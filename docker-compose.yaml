@@ -2,11 +2,11 @@ version: "3"
 
 services:
   proxy:
-    image: envoyproxy/envoy:distroless-dev
+    build:
+      context: .
+      dockerfile: Dockerfile-proxy
     ports:
-      - 80:10000
-    volumes:
-      - ./config/envoy.yaml:/etc/envoy/envoy.yaml
+      - 443:443
 
   app:
     build: .

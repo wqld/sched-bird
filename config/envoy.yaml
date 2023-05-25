@@ -4,7 +4,7 @@ static_resources:
       address:
         socket_address:
           address: 0.0.0.0
-          port_value: 10000
+          port_value: 443
       filter_chains:
         - filters:
             - name: envoy.filters.network.http_connection_manager
@@ -18,13 +18,24 @@ static_resources:
                 route_config:
                   name: local_route
                   virtual_hosts:
-                    - name: local_service
-                      domains: [ "*" ]
+                    - name: app
+                      domains:
+                        - "*"
                       routes:
                         - match:
                             prefix: "/"
                           route:
                             cluster: sched_bird_cluster
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain:
+                      filename: "/etc/cert.crt"
+                    private_key:
+                      filename: "/etc/cert.key"
   clusters:
     - name: sched_bird_cluster
       type: STRICT_DNS

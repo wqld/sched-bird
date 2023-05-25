@@ -1,0 +1,7 @@
+FROM envoyproxy/envoy:dev
+
+ADD ./config/envoy.yaml /etc/envoy/envoy.yaml
+ADD ./fullchain.pem /etc/cert.crt
+ADD ./privkey.pem /etc/cert.key
+
+RUN chmod go+r /etc/cert.crt /etc/cert.key
