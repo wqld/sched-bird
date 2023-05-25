@@ -1,0 +1,14 @@
+version: "3"
+
+services:
+  proxy:
+    image: envoyproxy/envoy:distroless-dev
+    ports:
+      - 80:10000
+    volumes:
+      - ./config/envoy.yaml:/etc/envoy/envoy.yaml
+
+  app:
+    build: .
+    ports:
+      - 3000:3000
