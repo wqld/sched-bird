@@ -3,13 +3,14 @@ version: "3"
 services:
   proxy:
     build:
-      context: .
+      context: ./proxy/
       dockerfile: Dockerfile-proxy
     ports:
       - 443:443
 
   app:
-    build: .
+    build:
+      context: ./server/
     ports:
       - 3000:3000
     restart: on-failure
