@@ -20,7 +20,7 @@ static_resources:
                   virtual_hosts:
                     - name: app
                       domains:
-                        - "*"
+                        - "sched.sinabro.io"
                       routes:
                         - match:
                             prefix: "/"
