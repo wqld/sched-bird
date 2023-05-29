@@ -4,9 +4,11 @@ use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::Result;
 use axum::body::{boxed, Body};
+use axum::extract::{Path, State};
 use axum::http::{header, Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -23,9 +25,11 @@ use oauth2::{
 use octocrab::Octocrab;
 use scylla::macros::FromRow;
 use scylla::IntoTypedRows;
+use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tower::ServiceExt;
 use tower_http::services::ServeDir;
+use url::Url;
 
 #[derive(Parser, Debug)]
 #[clap(name = "Sched Bird")]
@@ -38,6 +42,12 @@ struct Opt {
 
     #[clap(short = 's', long = "static", default_value = "./dist")]
     static_dir: String,
+}
+
+struct AppState {
+    db: Arc<db::Scylla>,
+    client: BasicClient,
+    authorize_url: Url,
 }
 
 #[derive(Debug, Default, Clone, FromRow)]
@@ -59,7 +69,41 @@ async fn main() -> Result<()> {
 
     println!("Listening on http://{}", sock_addr);
 
-    let db = db::Scylla::new().await?;
+    let github_client_id =
+        ClientId::new(env::var("GITHUB_CLIENT_ID").expect("Missing the GITHUB_CLIENT_ID env"));
+    let github_client_secret = ClientSecret::new(
+        env::var("GITHUB_CLIENT_SECRET").expect("Missing the GITHUB_CLIENT_SECRET env"),
+    );
+
+    let auth_url = AuthUrl::new("https://github.com/login/oauth/authorize".to_string())
+        .expect("Invalid auth url");
+    let token_url = TokenUrl::new("https://github.com/login/oauth/access_token".to_string())
+        .expect("Invalid token url");
+
+    let client = BasicClient::new(
+        github_client_id,
+        Some(github_client_secret),
+        auth_url,
+        Some(token_url),
+    )
+    .set_redirect_uri(
+        RedirectUrl::new("https://sched.sinabro.io/".to_string()).expect("Invalid redirect url"),
+    );
+
+    let (authorize_url, csrf_state) = client
+        .authorize_url(CsrfToken::new_random)
+        .add_scope(Scope::new("user".to_string()))
+        .url();
+
+    println!("Browse to: {}", authorize_url.to_string());
+
+    let db = Arc::new(db::Scylla::new().await?);
+
+    let shared_state = Arc::new(AppState {
+        db: db.clone(),
+        client,
+        authorize_url,
+    });
 
     if let Some(rows) = db
         .session
@@ -74,9 +118,11 @@ async fn main() -> Result<()> {
     }
 
     let app = Router::new()
-        // .route("/", get(handler))
+        .route("/api/v1/groups/:group_id/scheds", get(handler))
+        .route("/", get(root))
         .route("/api/hello", get(hello))
-        // .route_layer(middleware::from_fn(auth))
+        .with_state(db)
+        .route_layer(middleware::from_fn_with_state(shared_state, auth))
         .fallback(get(|req| async move {
             match ServeDir::new(&opt.static_dir).oneshot(req).await {
                 Ok(res) => {
@@ -121,38 +167,33 @@ async fn hello() -> impl IntoResponse {
     "hello from server!"
 }
 
-async fn handler(Extension(user): Extension<User>) -> impl IntoResponse {
+async fn handler(Path(group_id): Path<String>) -> impl IntoResponse {
+    format!("Hello, {}!", group_id)
+}
+
+async fn root(Extension(user): Extension<User>) -> impl IntoResponse {
     format!("Hello, {}!", user.id)
 }
 
-async fn auth<B>(mut req: Request<B>, next: Next<B>) -> Result<Response, StatusCode> {
-    let github_client_id =
-        ClientId::new(env::var("GITHUB_CLIENT_ID").expect("Missing the GITHUB_CLIENT_ID env"));
-    let github_client_secret = ClientSecret::new(
-        env::var("GITHUB_CLIENT_SECRET").expect("Missing the GITHUB_CLIENT_SECRET env"),
-    );
+async fn auth<B>(
+    State(shared): State<Arc<AppState>>,
+    mut req: Request<B>,
+    next: Next<B>,
+) -> Result<Response, StatusCode> {
+    // get bearer token from header
+    // let bearer_token = match req.headers().get(header::AUTHORIZATION) {
+    //     Some(header) => match header.to_str() {
+    //         Ok(header) => header,
+    //         Err(_) => return Err(StatusCode::UNAUTHORIZED),
+    //     },
+    //     None => return Err(StatusCode::UNAUTHORIZED),
+    // };
 
-    let auth_url = AuthUrl::new("https://github.com/login/oauth/authorize".to_string())
-        .expect("Invalid auth url");
-    let token_url = TokenUrl::new("https://github.com/login/oauth/access_token".to_string())
-        .expect("Invalid token url");
-
-    let client = BasicClient::new(
-        github_client_id,
-        Some(github_client_secret),
-        auth_url,
-        Some(token_url),
-    )
-    .set_redirect_uri(
-        RedirectUrl::new("https://sched.sinabro.io/".to_string()).expect("Invalid redirect url"),
-    );
-
-    let (authorize_url, csrf_state) = client
-        .authorize_url(CsrfToken::new_random)
-        .add_scope(Scope::new("user".to_string()))
-        .url();
-
-    println!("Browse to: {}", authorize_url.to_string());
+    // // get user from db
+    // let user = match db::get_user_by_token(bearer_token).await {
+    //     Ok(user) => user,
+    //     Err(_) => return Err(StatusCode::UNAUTHORIZED),
+    // };
 
     let query = req.uri().query().unwrap_or_default();
 
@@ -173,7 +214,7 @@ async fn auth<B>(mut req: Request<B>, next: Next<B>) -> Result<Response, StatusC
     if code.is_none() || state.is_none() {
         let res = Response::builder()
             .status(StatusCode::FOUND)
-            .header(header::LOCATION, authorize_url.to_string())
+            .header(header::LOCATION, shared.authorize_url.to_string())
             .body(UnsyncBoxBody::default())
             .unwrap();
 
@@ -184,13 +225,14 @@ async fn auth<B>(mut req: Request<B>, next: Next<B>) -> Result<Response, StatusC
     let state = CsrfToken::new(state.unwrap().to_string());
 
     println!("Github returned the following code:\n{}\n", code.secret());
-    println!(
-        "Github returned the following state:\n{} (expected `{}`)\n",
-        state.secret(),
-        csrf_state.secret()
-    );
+    // println!(
+    //     "Github returned the following state:\n{} (expected `{}`)\n",
+    //     state.secret(),
+    //     csrf_state.secret()
+    // );
 
-    let token_res = client
+    let token_res = shared
+        .client
         .exchange_code(code)
         .request_async(async_http_client)
         .await;

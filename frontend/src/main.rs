@@ -7,14 +7,11 @@ use yew_router::prelude::*;
 enum Route {
     #[at("/")]
     Home,
-    #[at("/hello")]
-    Hello,
 }
 
 fn switch(routes: Route) -> Html {
     match routes {
-        Route::Home => html! { <div>{"Hello Frontend"}</div> },
-        Route::Hello => html! { <Hello /> },
+        Route::Home => html! { <Home /> },
     }
 }
 
@@ -27,8 +24,8 @@ fn app() -> Html {
     }
 }
 
-#[function_component(Hello)]
-fn hello() -> Html {
+#[function_component(Home)]
+fn home() -> Html {
     let data = use_state(|| None);
 
     {
@@ -36,7 +33,10 @@ fn hello() -> Html {
         use_effect(move || {
             if data.is_none() {
                 spawn_local(async move {
-                    let resp = Request::get("/api/hello").send().await.unwrap();
+                    let resp = Request::get("/api/v1/groups/test/scheds")
+                        .send()
+                        .await
+                        .unwrap();
                     let result = {
                         if !resp.ok() {
                             Err(format!(
