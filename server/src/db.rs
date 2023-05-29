@@ -26,6 +26,10 @@ impl Scylla {
             )
             .await?;
 
+        session
+            .query("CREATE INDEX IF NOT EXISTS ON ks.u (auth_token)", &[])
+            .await?;
+
         let prepared = session
             .prepare("INSERT INTO ks.u (id, group, auth_token) VALUES (?, ?, ?)")
             .await?;
