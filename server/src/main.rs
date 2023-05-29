@@ -12,7 +12,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use axum::body::{boxed, Body};
 use axum::extract::{Path, State};
-use axum::http::{header, Request, StatusCode};
+use axum::http::{header, HeaderValue, Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::{middleware, Extension};
@@ -22,7 +22,7 @@ use http_body::combinators::UnsyncBoxBody;
 use oauth2::basic::BasicClient;
 use oauth2::reqwest::async_http_client;
 use oauth2::{
-    AuthUrl, AuthorizationCode, Client, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope,
+    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope,
     TokenResponse, TokenUrl,
 };
 use octocrab::Octocrab;
@@ -49,7 +49,6 @@ struct AppState {
     db: Arc<db::Scylla>,
     client: BasicClient,
     authorize_url: Url,
-    user: Option<User>,
 }
 
 #[tokio::main]
@@ -67,7 +66,7 @@ async fn main() -> Result<()> {
 
     let client = create_github_client();
 
-    let (authorize_url, csrf_state) = client
+    let (authorize_url, _csrf_state) = client
         .authorize_url(CsrfToken::new_random)
         .add_scope(Scope::new("user".to_string()))
         .url();
@@ -80,7 +79,6 @@ async fn main() -> Result<()> {
         db,
         client,
         authorize_url,
-        user: None,
     });
 
     if let Some(rows) = shared_state
@@ -97,8 +95,8 @@ async fn main() -> Result<()> {
     }
 
     let app = Router::new()
-        .route("/api/v1/groups/:group_id/scheds", get(handler))
         .route("/", get(root))
+        .route("/api/v1/groups/:group_id/scheds", get(handler))
         .route("/api/hello", get(hello))
         .with_state(Arc::clone(&shared_state))
         .route_layer(middleware::from_fn_with_state(shared_state, auth))
@@ -146,17 +144,20 @@ async fn hello() -> impl IntoResponse {
     "hello from server!"
 }
 
-async fn handler(Path(group_id): Path<String>) -> impl IntoResponse {
-    format!("Hello, {}!", group_id)
-}
-
 async fn root(Extension(user): Extension<User>) -> impl IntoResponse {
     format!("Hello, {}!", user.id)
 }
 
+async fn handler(
+    Path(group_id): Path<String>,
+    Extension(user): Extension<User>,
+) -> impl IntoResponse {
+    format!("Hello, {}/{}!", user.id, group_id)
+}
+
 async fn auth<B>(
     State(shared): State<Arc<AppState>>,
-    mut req: Request<B>,
+    req: Request<B>,
     next: Next<B>,
 ) -> Result<Response, StatusCode> {
     match req.headers().get(header::AUTHORIZATION) {
@@ -169,9 +170,7 @@ async fn auth<B>(
                 match user_opt {
                     Some(user) => {
                         println!("user: {:?}", user);
-
-                        req.extensions_mut().insert(user);
-                        return Ok(next.run(req).await);
+                        return Ok(auth_next(req, next, user).await);
                     }
                     None => return Err(StatusCode::UNAUTHORIZED),
                 }
@@ -202,9 +201,7 @@ async fn auth<B>(
                     };
 
                     println!("user: {:?}", user);
-
-                    req.extensions_mut().insert(user);
-                    return Ok(next.run(req).await);
+                    return Ok(auth_next(req, next, user).await);
                 }
                 Err(StatusCode::FOUND) => {
                     let res = Response::builder()
@@ -267,14 +264,9 @@ async fn get_github_user_id_and_token(
     }
 
     let code = AuthorizationCode::new(code.unwrap().to_string());
-    let state = CsrfToken::new(state.unwrap().to_string());
+    let _state = CsrfToken::new(state.unwrap().to_string());
 
     println!("Github returned the following code:\n{}\n", code.secret());
-    // println!(
-    //     "Github returned the following state:\n{} (expected `{}`)\n",
-    //     state.secret(),
-    //     csrf_state.secret()
-    // );
 
     let token_res = shared
         .client
@@ -309,4 +301,19 @@ async fn get_github_user_id_and_token(
     }
 
     Err(StatusCode::UNAUTHORIZED)
+}
+
+async fn auth_next<B>(mut req: Request<B>, next: Next<B>, user: User) -> Response {
+    let token = user.auth_token.clone();
+
+    req.extensions_mut().insert(user);
+
+    let mut res = next.run(req).await;
+
+    res.headers_mut().insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_str(token.as_str()).unwrap(),
+    );
+
+    res
 }
