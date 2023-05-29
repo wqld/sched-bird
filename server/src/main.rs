@@ -1,4 +1,7 @@
 mod db;
+mod user;
+
+use crate::user::User;
 
 use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -23,9 +26,7 @@ use oauth2::{
     TokenResponse, TokenUrl,
 };
 use octocrab::Octocrab;
-use scylla::macros::FromRow;
 use scylla::IntoTypedRows;
-use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tower::ServiceExt;
 use tower_http::services::ServeDir;
@@ -48,12 +49,7 @@ struct AppState {
     db: Arc<db::Scylla>,
     client: BasicClient,
     authorize_url: Url,
-}
-
-#[derive(Debug, Default, Clone, FromRow)]
-struct User {
-    id: String,
-    group: String,
+    user: Option<User>,
 }
 
 #[tokio::main]
@@ -100,14 +96,16 @@ async fn main() -> Result<()> {
     let db = Arc::new(db::Scylla::new().await?);
 
     let shared_state = Arc::new(AppState {
-        db: db.clone(),
+        db,
         client,
         authorize_url,
+        user: None,
     });
 
-    if let Some(rows) = db
+    if let Some(rows) = shared_state
+        .db
         .session
-        .query("SELECT id, group FROM ks.u", &[])
+        .query("SELECT id, group, auth_token FROM ks.u", &[])
         .await?
         .rows
     {
@@ -121,7 +119,7 @@ async fn main() -> Result<()> {
         .route("/api/v1/groups/:group_id/scheds", get(handler))
         .route("/", get(root))
         .route("/api/hello", get(hello))
-        .with_state(db)
+        .with_state(Arc::clone(&shared_state))
         .route_layer(middleware::from_fn_with_state(shared_state, auth))
         .fallback(get(|req| async move {
             match ServeDir::new(&opt.static_dir).oneshot(req).await {
@@ -180,23 +178,72 @@ async fn auth<B>(
     mut req: Request<B>,
     next: Next<B>,
 ) -> Result<Response, StatusCode> {
-    // get bearer token from header
-    // let bearer_token = match req.headers().get(header::AUTHORIZATION) {
-    //     Some(header) => match header.to_str() {
-    //         Ok(header) => header,
-    //         Err(_) => return Err(StatusCode::UNAUTHORIZED),
-    //     },
-    //     None => return Err(StatusCode::UNAUTHORIZED),
-    // };
+    match req.headers().get(header::AUTHORIZATION) {
+        Some(header) => match header.to_str() {
+            Ok(header) => {
+                println!("header: {}", header);
 
-    // // get user from db
-    // let user = match db::get_user_by_token(bearer_token).await {
-    //     Ok(user) => user,
-    //     Err(_) => return Err(StatusCode::UNAUTHORIZED),
-    // };
+                let user_opt = shared.db.find_user_by_auth_token(header).await.unwrap();
 
-    let query = req.uri().query().unwrap_or_default();
+                match user_opt {
+                    Some(user) => {
+                        println!("user: {:?}", user);
 
+                        req.extensions_mut().insert(user);
+                        return Ok(next.run(req).await);
+                    }
+                    None => return Err(StatusCode::UNAUTHORIZED),
+                }
+            }
+            Err(_) => return Err(StatusCode::UNAUTHORIZED),
+        },
+        None => {
+            let query = req.uri().query().unwrap_or_default();
+
+            match get_github_user_id_and_token(query, &shared).await {
+                Ok((id, token)) => {
+                    let user_opt = shared.db.find_user_by_id(&id).await.unwrap();
+                    let user = match user_opt {
+                        Some(mut user) => {
+                            user.auth_token = token;
+                            shared.db.update_user(&user).await.unwrap();
+                            user
+                        }
+                        None => {
+                            let user = User {
+                                id,
+                                group: "home".to_owned(),
+                                auth_token: token,
+                            };
+                            shared.db.insert_user(&user).await.unwrap();
+                            user
+                        }
+                    };
+
+                    println!("user: {:?}", user);
+
+                    req.extensions_mut().insert(user);
+                    return Ok(next.run(req).await);
+                }
+                Err(StatusCode::FOUND) => {
+                    let res = Response::builder()
+                        .status(StatusCode::FOUND)
+                        .header(header::LOCATION, shared.authorize_url.to_string())
+                        .body(UnsyncBoxBody::default())
+                        .unwrap();
+
+                    return Ok(res);
+                }
+                _ => return Err(StatusCode::UNAUTHORIZED),
+            }
+        }
+    }
+}
+
+async fn get_github_user_id_and_token(
+    query: &str,
+    shared: &Arc<AppState>,
+) -> Result<(String, String), StatusCode> {
     println!("query: {}", query);
 
     let mut params = url::form_urlencoded::parse(query.as_bytes()).into_owned();
@@ -212,13 +259,7 @@ async fn auth<B>(
     println!("code: {:?}, state: {:?}", code, state);
 
     if code.is_none() || state.is_none() {
-        let res = Response::builder()
-            .status(StatusCode::FOUND)
-            .header(header::LOCATION, shared.authorize_url.to_string())
-            .body(UnsyncBoxBody::default())
-            .unwrap();
-
-        return Ok(res);
+        return Err(StatusCode::FOUND);
     }
 
     let code = AuthorizationCode::new(code.unwrap().to_string());
@@ -258,15 +299,9 @@ async fn auth<B>(
 
         let cur_user = octocrab.current().user().await.unwrap();
 
-        println!("user: {:?}", cur_user.login);
+        println!("user id: {:?}", cur_user.login);
 
-        let user = User {
-            id: cur_user.login,
-            ..Default::default()
-        };
-
-        req.extensions_mut().insert(user);
-        return Ok(next.run(req).await);
+        return Ok((cur_user.login, token.access_token().secret().to_owned()));
     }
 
     Err(StatusCode::UNAUTHORIZED)
