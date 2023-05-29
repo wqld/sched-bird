@@ -22,7 +22,7 @@ use http_body::combinators::UnsyncBoxBody;
 use oauth2::basic::BasicClient;
 use oauth2::reqwest::async_http_client;
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope,
+    AuthUrl, AuthorizationCode, Client, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope,
     TokenResponse, TokenUrl,
 };
 use octocrab::Octocrab;
@@ -65,26 +65,7 @@ async fn main() -> Result<()> {
 
     println!("Listening on http://{}", sock_addr);
 
-    let github_client_id =
-        ClientId::new(env::var("GITHUB_CLIENT_ID").expect("Missing the GITHUB_CLIENT_ID env"));
-    let github_client_secret = ClientSecret::new(
-        env::var("GITHUB_CLIENT_SECRET").expect("Missing the GITHUB_CLIENT_SECRET env"),
-    );
-
-    let auth_url = AuthUrl::new("https://github.com/login/oauth/authorize".to_string())
-        .expect("Invalid auth url");
-    let token_url = TokenUrl::new("https://github.com/login/oauth/access_token".to_string())
-        .expect("Invalid token url");
-
-    let client = BasicClient::new(
-        github_client_id,
-        Some(github_client_secret),
-        auth_url,
-        Some(token_url),
-    )
-    .set_redirect_uri(
-        RedirectUrl::new("https://sched.sinabro.io/".to_string()).expect("Invalid redirect url"),
-    );
+    let client = create_github_client();
 
     let (authorize_url, csrf_state) = client
         .authorize_url(CsrfToken::new_random)
@@ -238,6 +219,29 @@ async fn auth<B>(
             }
         }
     }
+}
+
+fn create_github_client() -> BasicClient {
+    let github_client_id =
+        ClientId::new(env::var("GITHUB_CLIENT_ID").expect("Missing the GITHUB_CLIENT_ID env"));
+    let github_client_secret = ClientSecret::new(
+        env::var("GITHUB_CLIENT_SECRET").expect("Missing the GITHUB_CLIENT_SECRET env"),
+    );
+
+    let auth_url = AuthUrl::new("https://github.com/login/oauth/authorize".to_string())
+        .expect("Invalid auth url");
+    let token_url = TokenUrl::new("https://github.com/login/oauth/access_token".to_string())
+        .expect("Invalid token url");
+
+    BasicClient::new(
+        github_client_id,
+        Some(github_client_secret),
+        auth_url,
+        Some(token_url),
+    )
+    .set_redirect_uri(
+        RedirectUrl::new("https://sched.sinabro.io/".to_string()).expect("Invalid redirect url"),
+    )
 }
 
 async fn get_github_user_id_and_token(
