@@ -21,6 +21,7 @@ use oauth2::basic::BasicClient;
 use oauth2::{CsrfToken, Scope};
 use render::render_app;
 use scylla::IntoTypedRows;
+use tower_cookies::{CookieManagerLayer, Cookies};
 use url::Url;
 
 #[derive(Parser, Debug)]
@@ -84,9 +85,11 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/", get(root))
+        .route("/auth", get(auth))
         .route("/api/v1/groups/:group_id/scheds", get(handler))
         .with_state(Arc::clone(&shared_state))
-        .route_layer(middleware::from_fn_with_state(shared_state, auth::auth));
+        .route_layer(middleware::from_fn_with_state(shared_state, auth::auth))
+        .layer(CookieManagerLayer::new());
 
     axum::Server::bind(&sock_addr)
         .serve(app.into_make_service())
@@ -106,6 +109,14 @@ async fn root(Extension(user): Extension<User>) -> impl IntoResponse {
         .header(header::CONTENT_TYPE, "text/html")
         .header(header::AUTHORIZATION, user.auth_token)
         .body(boxed(Body::from(content)))
+        .unwrap()
+}
+
+async fn auth() -> impl IntoResponse {
+    Response::builder()
+        .status(StatusCode::FOUND)
+        .header(header::LOCATION, "https://sched.sinabro.io/")
+        .body(boxed(Body::empty()))
         .unwrap()
 }
 

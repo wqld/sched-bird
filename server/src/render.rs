@@ -16,7 +16,7 @@ fn App(props: &AppProps) -> Html {
 }
 
 pub async fn render_app(id: String) -> String {
-    let content = spawn_blocking(move || {
+    spawn_blocking(move || {
         use tokio::runtime::Builder;
         let set = LocalSet::new();
 
@@ -28,7 +28,5 @@ pub async fn render_app(id: String) -> String {
         })
     })
     .await
-    .expect("error rendering app");
-
-    content
+    .expect("error rendering app")
 }

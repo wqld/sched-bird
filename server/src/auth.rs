@@ -14,32 +14,38 @@ use oauth2::{
     TokenUrl,
 };
 use octocrab::Octocrab;
+use tower_cookies::{Cookie, Cookies};
 
 use crate::user::User;
 use crate::AppState;
 
 pub async fn auth<B>(
+    cookies: Cookies,
     State(shared): State<Arc<AppState>>,
     req: Request<B>,
     next: Next<B>,
 ) -> Result<Response, StatusCode> {
-    match req.headers().get(header::AUTHORIZATION) {
-        Some(header) => match header.to_str() {
-            Ok(header) => {
-                println!("header: {}", header);
+    let cookie_token: Option<String> = cookies
+        .get("auth_token")
+        .and_then(|c| c.value().parse().ok());
 
-                let user_opt = shared.db.find_user_by_auth_token(header).await.unwrap();
+    match cookie_token {
+        Some(token) => {
+            println!("token: {}", token);
 
-                match user_opt {
-                    Some(user) => {
-                        println!("user: {:?}", user);
-                        return Ok(auth_next(req, next, user).await);
-                    }
-                    None => return Err(StatusCode::UNAUTHORIZED),
+            let user_opt = shared.db.find_user_by_auth_token(&token).await.unwrap();
+
+            match user_opt {
+                Some(user) => {
+                    println!("user: {:?}", user);
+                    return Ok(auth_next(req, next, user).await);
+                }
+                None => {
+                    cookies.remove(Cookie::new("auth_token", ""));
+                    return Err(StatusCode::BAD_REQUEST);
                 }
             }
-            Err(_) => return Err(StatusCode::UNAUTHORIZED),
-        },
+        }
         None => {
             let query = req.uri().query().unwrap_or_default();
 
@@ -100,7 +106,8 @@ pub fn create_github_client() -> BasicClient {
         Some(token_url),
     )
     .set_redirect_uri(
-        RedirectUrl::new("https://sched.sinabro.io/".to_string()).expect("Invalid redirect url"),
+        RedirectUrl::new("https://sched.sinabro.io/auth".to_string())
+            .expect("Invalid redirect url"),
     )
 }
 
@@ -176,6 +183,11 @@ async fn auth_next<B>(mut req: Request<B>, next: Next<B>, user: User) -> Respons
     res.headers_mut().insert(
         header::AUTHORIZATION,
         HeaderValue::from_str(token.as_str()).unwrap(),
+    );
+
+    res.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(format!("auth_token={}", token).as_str()).unwrap(),
     );
 
     res
