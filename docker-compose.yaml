@@ -6,6 +6,7 @@ services:
       context: ./proxy/
       dockerfile: Dockerfile-proxy
     ports:
+      - 80:80
       - 443:443
 
   app:
