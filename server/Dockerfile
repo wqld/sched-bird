@@ -15,7 +15,7 @@ WORKDIR /app/sched-bird
 
 RUN cargo build --release --target aarch64-unknown-linux-musl
 COPY src ./src
-COPY dist ./dist
+# COPY dist ./dist
 RUN touch src/main.rs
 RUN cargo build --release --target aarch64-unknown-linux-musl
 
@@ -25,6 +25,6 @@ FROM scratch
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /app/sched-bird/target/aarch64-unknown-linux-musl/release/sched-bird /sched-bird
-COPY --from=builder /app/sched-bird/dist /dist
+# COPY --from=builder /app/sched-bird/dist /dist
 
 CMD ["/sched-bird"]

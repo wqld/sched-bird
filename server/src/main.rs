@@ -1,11 +1,11 @@
 mod db;
+mod render;
 mod user;
 
 use crate::user::User;
 
 use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -18,7 +18,6 @@ use axum::response::{IntoResponse, Response};
 use axum::{middleware, Extension};
 use axum::{routing::get, Router};
 use clap::Parser;
-use http_body::combinators::UnsyncBoxBody;
 use oauth2::basic::BasicClient;
 use oauth2::reqwest::async_http_client;
 use oauth2::{
@@ -26,10 +25,9 @@ use oauth2::{
     TokenResponse, TokenUrl,
 };
 use octocrab::Octocrab;
+use render::render_app;
 use scylla::IntoTypedRows;
-use tokio::fs;
-use tower::ServiceExt;
-use tower_http::services::ServeDir;
+use tokio::task::{spawn_blocking, LocalSet};
 use url::Url;
 
 #[derive(Parser, Debug)]
@@ -40,9 +38,6 @@ struct Opt {
 
     #[clap(short = 'p', long = "port", default_value = "3000")]
     port: u16,
-
-    #[clap(short = 's', long = "static", default_value = "./dist")]
-    static_dir: String,
 }
 
 struct AppState {
@@ -97,40 +92,8 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/", get(root))
         .route("/api/v1/groups/:group_id/scheds", get(handler))
-        .route("/api/hello", get(hello))
         .with_state(Arc::clone(&shared_state))
-        .route_layer(middleware::from_fn_with_state(shared_state, auth))
-        .fallback(get(|req| async move {
-            match ServeDir::new(&opt.static_dir).oneshot(req).await {
-                Ok(res) => {
-                    let status = res.status();
-                    match status {
-                        StatusCode::NOT_FOUND => {
-                            let index_path = PathBuf::from(&opt.static_dir).join("index.html");
-                            let index_content = match fs::read_to_string(index_path).await {
-                                Err(_) => {
-                                    return Response::builder()
-                                        .status(StatusCode::NOT_FOUND)
-                                        .body(boxed(Body::from("index file not found")))
-                                        .unwrap()
-                                }
-                                Ok(index_content) => index_content,
-                            };
-
-                            Response::builder()
-                                .status(StatusCode::OK)
-                                .body(boxed(Body::from(index_content)))
-                                .unwrap()
-                        }
-                        _ => res.map(boxed),
-                    }
-                }
-                Err(err) => Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(boxed(Body::from(format!("error: {err}"))))
-                    .expect("error response"),
-            }
-        }));
+        .route_layer(middleware::from_fn_with_state(shared_state, auth));
 
     axum::Server::bind(&sock_addr)
         .serve(app.into_make_service())
@@ -140,12 +103,17 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn hello() -> impl IntoResponse {
-    "hello from server!"
-}
-
 async fn root(Extension(user): Extension<User>) -> impl IntoResponse {
-    format!("Hello, {}!", user.id)
+    let id = user.id.clone();
+
+    let content = render_app(id).await;
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/html")
+        .header(header::AUTHORIZATION, user.auth_token)
+        .body(boxed(Body::from(content)))
+        .unwrap()
 }
 
 async fn handler(
@@ -207,7 +175,7 @@ async fn auth<B>(
                     let res = Response::builder()
                         .status(StatusCode::FOUND)
                         .header(header::LOCATION, shared.authorize_url.to_string())
-                        .body(UnsyncBoxBody::default())
+                        .body(boxed(Body::empty()))
                         .unwrap();
 
                     return Ok(res);
