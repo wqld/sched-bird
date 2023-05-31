@@ -7,6 +7,7 @@ mod user;
 use crate::user::User;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -14,15 +15,19 @@ use anyhow::Result;
 use axum::body::{boxed, Body};
 use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Response};
 use axum::{middleware, Extension};
 use axum::{routing::get, Router};
 use clap::Parser;
 use oauth2::basic::BasicClient;
 use oauth2::{CsrfToken, Scope};
 use render::render_app;
+use sched_bird::App;
 use scylla::IntoTypedRows;
+use tokio::fs;
+use tower::util::ServiceExt;
 use tower_cookies::CookieManagerLayer;
+use tower_http::services::ServeDir;
 use url::Url;
 
 #[derive(Parser, Debug)]
@@ -33,6 +38,9 @@ struct Opt {
 
     #[clap(short = 'p', long = "port", default_value = "3000")]
     port: u16,
+
+    #[clap(short = 'd', long = "dist", default_value = "../../../dist")]
+    dist: String,
 }
 
 #[derive(Clone)]
@@ -86,12 +94,49 @@ async fn main() -> Result<()> {
     }
 
     let app = Router::new()
-        .route("/", get(root))
+        .route("/", get(render))
         .route("/auth", get(auth))
         .route("/api/v1/groups/:group_id/scheds", get(handler))
         .with_state(Arc::clone(&shared_state))
         .route_layer(middleware::from_fn_with_state(shared_state, auth::auth))
-        .layer(CookieManagerLayer::new());
+        .layer(CookieManagerLayer::new())
+        .fallback(get(|req| async move {
+            match ServeDir::new(&opt.dist).oneshot(req).await {
+                Ok(res) => {
+                    let status = res.status();
+                    match status {
+                        StatusCode::NOT_FOUND => {
+                            let index_path = PathBuf::from(&opt.dist).join("index.html");
+                            let index_content = match fs::read_to_string(index_path).await {
+                                Err(_) => {
+                                    return Response::builder()
+                                        .status(StatusCode::NOT_FOUND)
+                                        .body(boxed(Body::from("index file not found")))
+                                        .unwrap()
+                                }
+                                Ok(index_content) => index_content,
+                            };
+
+                            let (index_html_before, index_html_after) =
+                                index_content.split_once("<body>").unwrap();
+                            let index_html_before = format!("{}<body>", index_html_before);
+
+                            let renderer = yew::ServerRenderer::<App>::new();
+                            let rendered = renderer.render().await;
+                            let html =
+                                format!("{}{}{}", index_html_before, rendered, index_html_after);
+
+                            Html(html).into_response()
+                        }
+                        _ => res.map(boxed),
+                    }
+                }
+                Err(err) => Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(boxed(Body::from(format!("error: {err}"))))
+                    .expect("error response"),
+            }
+        }));
 
     axum::Server::bind(&sock_addr)
         .serve(app.into_make_service())
@@ -99,6 +144,30 @@ async fn main() -> Result<()> {
         .expect("server failed to start");
 
     Ok(())
+}
+
+async fn render() -> impl IntoResponse {
+    let index_path = PathBuf::from("../../../dist").join("index.html");
+    let index_content = match fs::read_to_string(index_path).await {
+        Err(_) => {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(boxed(Body::from("index file not found")))
+                .unwrap()
+        }
+        Ok(index_content) => index_content,
+    };
+
+    let (index_html_before, index_html_after) = index_content.split_once("<body>").unwrap();
+    let index_html_before = format!("{}<body>", index_html_before);
+
+    let renderer = yew::ServerRenderer::<App>::new();
+    let rendered = renderer.render().await;
+    let html = format!("{}{}{}", index_html_before, rendered, index_html_after);
+
+    println!("html: {}", html);
+
+    Html(html).into_response()
 }
 
 async fn root(
