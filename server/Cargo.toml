@@ -22,3 +22,4 @@ http-body = "0.4.5"
 openssl-probe = "0.1.5"
 octocrab = "0.23.0"
 yew = { version = "0.20.0", features = ["ssr"] }
+chrono = "0.4.26"

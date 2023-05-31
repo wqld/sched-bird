@@ -1,6 +1,7 @@
 mod auth;
 mod db;
 mod render;
+mod sched;
 mod user;
 
 use crate::user::User;
@@ -11,7 +12,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use axum::body::{boxed, Body};
-use axum::extract::Path;
+use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{middleware, Extension};
@@ -21,7 +22,7 @@ use oauth2::basic::BasicClient;
 use oauth2::{CsrfToken, Scope};
 use render::render_app;
 use scylla::IntoTypedRows;
-use tower_cookies::{CookieManagerLayer, Cookies};
+use tower_cookies::CookieManagerLayer;
 use url::Url;
 
 #[derive(Parser, Debug)]
@@ -34,6 +35,7 @@ struct Opt {
     port: u16,
 }
 
+#[derive(Clone)]
 pub struct AppState {
     db: Arc<db::Scylla>,
     client: BasicClient,
@@ -99,10 +101,17 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn root(Extension(user): Extension<User>) -> impl IntoResponse {
+async fn root(
+    Extension(user): Extension<User>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
     let id = user.id.clone();
 
-    let content = render_app(id).await;
+    let scheds = state.db.find_sched_by_group(&user.group).await.unwrap();
+
+    println!("scheds: {:?}", scheds);
+
+    let content = render_app(id, scheds).await;
 
     Response::builder()
         .status(StatusCode::OK)
