@@ -4,7 +4,7 @@ use yew::prelude::*;
 pub fn Footer() -> Html {
     html! {
         <footer>
-            <p> {"footer"} </p>
+            <input type="text" />
         </footer>
     }
 }

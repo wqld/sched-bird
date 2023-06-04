@@ -18,21 +18,23 @@ use anyhow::Result;
 use axum::body::{boxed, Body, StreamBody};
 use axum::error_handling::HandleError;
 use axum::extract::{Path, Query, State};
-use axum::handler::HandlerWithoutStateExt;
+// use axum::handler::HandlerWithoutStateExt;
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::{middleware, Extension};
+use axum::{middleware, Extension, Json};
 use axum::{routing::get, Router};
 use clap::Parser;
 use futures::stream::{self, StreamExt};
 use hyper::server::Server;
 use oauth2::basic::BasicClient;
+// use oauth2::reqwest::async_http_client;
 use oauth2::{CsrfToken, Scope};
-use render::render_app;
+// use octocrab::Octocrab;
 use sched_bird::{ServerApp, ServerAppProps};
 use scylla::IntoTypedRows;
+use serde_json::json;
 use tower::ServiceExt;
-use tower_cookies::CookieManagerLayer;
+use tower_cookies::{CookieManagerLayer, Cookies};
 use tower_http::services::ServeDir;
 use url::Url;
 use yew::platform::Runtime;
@@ -84,7 +86,7 @@ async fn main() -> Result<()> {
         opt.port,
     ));
 
-    println!("Listening on http://{}", sock_addr);
+    println!("Listening on {}", sock_addr);
 
     let client = auth::create_github_client();
 
@@ -93,7 +95,7 @@ async fn main() -> Result<()> {
         .add_scope(Scope::new("user".to_string()))
         .url();
 
-    println!("Browse to: {}", authorize_url.to_string());
+    println!("Browse to: {}", authorize_url);
 
     let db = Arc::new(db::Scylla::new().await?);
 
@@ -136,8 +138,9 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/auth", get(auth))
-        .route("/api/v1/groups/:group_id/scheds", get(handler))
+        .route("/api/v1/groups/:group_id/scheds", get(get_scheds))
         .with_state(Arc::clone(&shared_state))
+        .route_layer(middleware::from_fn_with_state(shared_state, auth::auth))
         .fallback_service(HandleError::new(
             ServeDir::new(PathBuf::from(&opt.dist))
                 .append_index_html_on_directories(false)
@@ -148,7 +151,6 @@ async fn main() -> Result<()> {
                 ),
             handle_error,
         ))
-        .route_layer(middleware::from_fn_with_state(shared_state, auth::auth))
         .layer(CookieManagerLayer::new());
 
     Server::bind(&sock_addr)
@@ -162,14 +164,23 @@ async fn main() -> Result<()> {
 
 async fn render(
     url: Uri,
+    cookies: Cookies,
     Query(queries): Query<HashMap<String, String>>,
     State((index_html_before, index_html_after)): State<(String, String)>,
 ) -> impl IntoResponse {
     let url = url.to_string();
 
+    println!("cookies: {:?}", cookies);
+
+    let cookie_token: String = cookies
+        .get("auth_token")
+        .and_then(|c| c.value().parse().ok())
+        .unwrap_or_default();
+
     let renderer = yew::ServerRenderer::<ServerApp>::with_props(move || ServerAppProps {
         url: url.into(),
         queries,
+        token: cookie_token,
     });
 
     StreamBody::new(
@@ -180,37 +191,25 @@ async fn render(
     )
 }
 
-async fn root(
-    Extension(user): Extension<User>,
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
-    let id = user.id.clone();
-
-    let scheds = state.db.find_sched_by_group(&user.group).await.unwrap();
-
-    println!("scheds: {:?}", scheds);
-
-    let content = render_app(id, scheds).await;
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "text/html")
-        .header(header::AUTHORIZATION, user.auth_token)
-        .body(boxed(Body::from(content)))
-        .unwrap()
-}
-
-async fn auth() -> impl IntoResponse {
+async fn auth(Extension(user): Extension<User>) -> impl IntoResponse {
     Response::builder()
         .status(StatusCode::FOUND)
         .header(header::LOCATION, "https://sched.sinabro.io/")
+        .header(header::AUTHORIZATION, user.auth_token)
         .body(boxed(Body::empty()))
         .unwrap()
 }
 
-async fn handler(
+async fn get_scheds(
     Path(group_id): Path<String>,
-    Extension(user): Extension<User>,
+    // Extension(user): Extension<User>,
+    State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    format!("Hello, {}/{}!", user.id, group_id)
+    let scheds = state.db.find_sched_by_group(&group_id).await.unwrap();
+
+    let content = json!({ "data": scheds });
+
+    println!("scheds: {:?}", content);
+
+    Json(content)
 }

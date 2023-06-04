@@ -51,9 +51,9 @@ impl Scylla {
             )
             .await?;
 
-        let date1 = NaiveDate::from_ymd_opt(2023, 06, 05).unwrap();
-        let date2 = NaiveDate::from_ymd_opt(2023, 06, 17).unwrap();
-        let date3 = NaiveDate::from_ymd_opt(2023, 06, 30).unwrap();
+        let date1 = NaiveDate::from_ymd_opt(2023, 6, 5).unwrap();
+        let date2 = NaiveDate::from_ymd_opt(2023, 6, 17).unwrap();
+        let date3 = NaiveDate::from_ymd_opt(2023, 6, 30).unwrap();
         let create_at = Duration::seconds(64);
 
         session
@@ -100,24 +100,7 @@ impl Scylla {
             .rows
         {
             let row = rows.into_typed::<User>().next().unwrap()?;
-            return Ok(Some(row));
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub async fn find_user_by_auth_token(&self, auth_token: &str) -> Result<Option<User>> {
-        if let Some(rows) = self
-            .session
-            .query(
-                "SELECT id, group, auth_token FROM ks.u WHERE auth_token = ?",
-                (auth_token,),
-            )
-            .await?
-            .rows
-        {
-            let row = rows.into_typed::<User>().next().unwrap()?;
-            return Ok(Some(row));
+            Ok(Some(row))
         } else {
             Ok(None)
         }

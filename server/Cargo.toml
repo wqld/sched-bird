@@ -13,26 +13,26 @@ name = "app"
 required-features = ["ssr"]
 
 [dependencies]
-serde = { version = "1.0.163", features = ["derive"] }
+serde = { version = "1.0.162", features = ["derive"] }
 serde_json = "1.0.96"
-yew = { version = "0.20", features = ["ssr"] }
+yew = "0.20"
 yew-router = "0.17"
-log = "0.4"
 stylist = { version = "0.12", features = ["yew_integration"] }
 futures = { version = "0.3", features = ["std"], default-features = false }
-reqwest = { version = "0.11.18", default-features = false, features = [
+reqwest = { version = "0.11.17", features = [
   "json",
   "rustls-tls-native-roots",
-] }
+], default-features = false }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen-futures = "0.4"
-wasm-logger = "0.2"
+wasm-bindgen-futures = "0.4.36"
+wasm-logger = "0.2.0"
+log = "0.4.18"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clap = { version = "4.3", features = ["derive"] }
 anyhow = "1.0"
-tokio = { version = "1.28.0", features = ["full"] }
+tokio = { version = "1.28.1", features = ["full"] }
 axum = "0.6"
 tower = { version = "0.4", features = ["make"] }
 tower-http = { version = "0.3", features = ["fs"] }
@@ -44,7 +44,7 @@ http-body = "0.4.5"
 octocrab = "0.23.0"
 chrono = "0.4.26"
 hyper = { version = "0.14", features = ["server", "http1"] }
-env_logger = "0.10"
+jsonwebtoken = "8.3"
 
 [features]
 hydration = ["yew/hydration"]

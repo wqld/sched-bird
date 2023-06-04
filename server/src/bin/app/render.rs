@@ -1,4 +1,3 @@
-use tokio::task::{spawn_blocking, LocalSet};
 use yew::prelude::*;
 
 use crate::sched::Sched;
@@ -31,7 +30,7 @@ fn App(props: &AppProps) -> Html {
                     for props.scheds.iter().map(|sched| {
                         html! {
                             <div>
-                                <p>{ format!("{} {} {}", sched.date_at.to_string(), sched.id, sched.sched) }</p>
+                                <p>{ format!("{} {} {}", sched.date_at, sched.id, sched.sched) }</p>
                             </div>
                         }
                     })
@@ -46,18 +45,18 @@ fn App(props: &AppProps) -> Html {
     }
 }
 
-pub async fn render_app(user: String, scheds: Vec<Sched>) -> String {
-    spawn_blocking(move || {
-        use tokio::runtime::Builder;
-        let set = LocalSet::new();
+// pub async fn render_app(user: String, scheds: Vec<Sched>) -> String {
+//     spawn_blocking(move || {
+//         use tokio::runtime::Builder;
+//         let set = LocalSet::new();
 
-        let rt = Builder::new_current_thread().enable_all().build().unwrap();
+//         let rt = Builder::new_current_thread().enable_all().build().unwrap();
 
-        set.block_on(&rt, async {
-            let renderer = yew::ServerRenderer::<App>::with_props(|| AppProps { user, scheds });
-            renderer.render().await
-        })
-    })
-    .await
-    .expect("error rendering app")
-}
+//         set.block_on(&rt, async {
+//             let renderer = yew::ServerRenderer::<App>::with_props(|| AppProps { user, scheds });
+//             renderer.render().await
+//         })
+//     })
+//     .await
+//     .expect("error rendering app")
+// }

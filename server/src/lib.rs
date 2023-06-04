@@ -10,7 +10,7 @@ use yew_router::{
 };
 
 use crate::{
-    components::{footer::Footer, nav::Nav},
+    components::footer::Footer,
     pages::{home::Home, not_found::PageNotFound},
 };
 
@@ -18,44 +18,15 @@ use crate::{
 pub enum Route {
     #[at("/")]
     Home,
-    #[at("/count")]
-    Count,
     #[not_found]
     #[at("/404")]
     NotFound,
 }
 
 #[function_component]
-pub fn Count() -> Html {
-    let state = use_state(|| 0);
-
-    let incr_counter = {
-        let state = state.clone();
-        Callback::from(move |_| state.set(*state + 1))
-    };
-
-    let decr_counter = {
-        let state = state.clone();
-        Callback::from(move |_| state.set(*state - 1))
-    };
-
-    html! {
-        <>
-            <div>
-                <p> {"current count: "} {*state} </p>
-                <button onclick={incr_counter}> {"+"} </button>
-                <button onclick={decr_counter}> {"-"} </button>
-            </div>
-        </>
-    }
-}
-
-#[function_component]
 pub fn App() -> Html {
     html! {
         <BrowserRouter>
-            <Nav />
-
             <main>
                 <Switch<Route> render={switch} />
             </main>
@@ -69,10 +40,20 @@ pub fn App() -> Html {
 pub struct ServerAppProps {
     pub url: AttrValue,
     pub queries: HashMap<String, String>,
+    pub token: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Auth {
+    pub token: String,
 }
 
 #[function_component]
 pub fn ServerApp(props: &ServerAppProps) -> Html {
+    let ctx = use_state(|| Auth {
+        token: props.token.clone(),
+    });
+
     let history = AnyHistory::from(MemoryHistory::new());
     history
         .push_with_query(&*props.url, &props.queries)
@@ -80,21 +61,22 @@ pub fn ServerApp(props: &ServerAppProps) -> Html {
 
     html! {
         <Router history={history}>
-            <Nav />
 
-            <main>
-                <Switch<Route> render={switch} />
-            </main>
+                <main>
+                <ContextProvider<Auth> context={(*ctx).clone()}>
+                    <Switch<Route> render={switch} />
+                    </ContextProvider<Auth>>
+                </main>
 
-            <Footer />
+                <Footer />
+
         </Router>
     }
 }
 
 fn switch(routes: Route) -> Html {
     match routes {
-        Route::Home => html! { <Home /> },
-        Route::Count => html! { <Count /> },
+        Route::Home => html! { <Home  /> },
         Route::NotFound => html! { <PageNotFound /> },
     }
 }
