@@ -1,5 +1,6 @@
 mod auth;
 mod db;
+mod gpt;
 mod render;
 mod sched;
 mod user;
@@ -122,6 +123,13 @@ async fn main() -> Result<()> {
 
     let (index_html_before, index_html_after) = index_html_s.split_once("<body>").unwrap();
     let mut index_html_before = index_html_before.to_owned();
+
+    let head_end_index = index_html_before
+        .find("</head>")
+        .unwrap_or_else(|| index_html_before.len());
+
+    let tailwind_css = r#"<script src="https://cdn.tailwindcss.com"></script>"#;
+    index_html_before.insert_str(head_end_index, tailwind_css);
     index_html_before.push_str("<body>");
 
     let index_html_after = index_html_after.to_owned();

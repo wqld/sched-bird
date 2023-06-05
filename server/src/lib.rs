@@ -9,10 +9,7 @@ use yew_router::{
     prelude::*,
 };
 
-use crate::{
-    components::footer::Footer,
-    pages::{home::Home, not_found::PageNotFound},
-};
+use crate::pages::{home::Home, not_found::PageNotFound};
 
 #[derive(Routable, PartialEq, Eq, Clone, Debug)]
 pub enum Route {
@@ -30,8 +27,6 @@ pub fn App() -> Html {
             <main>
                 <Switch<Route> render={switch} />
             </main>
-
-            <Footer />
         </BrowserRouter>
     }
 }
@@ -67,15 +62,11 @@ pub fn ServerApp(props: &ServerAppProps) -> Html {
 
     html! {
         <Router history={history}>
-
                 <main>
                 <ContextProvider<Auth> context={(*ctx).clone()}>
                     <Switch<Route> render={switch} />
                     </ContextProvider<Auth>>
                 </main>
-
-                <Footer />
-
         </Router>
     }
 }
