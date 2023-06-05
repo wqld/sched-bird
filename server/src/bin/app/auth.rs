@@ -22,17 +22,17 @@ use crate::AppState;
 
 const BEARER: &str = "Bearer ";
 const JWT_MAX_AGES: i64 = 60;
-const DEFAULT_GROUP: &str = "home";
+const DEFAULT_CHANNEL: &str = "home";
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Claims {
     user: String,
-    group: String,
+    channel: String,
     token: String,
     exp: usize,
 }
 
-pub fn create_jwt(user: &str, group: &str, token: &str) -> Result<String> {
+pub fn create_jwt(user: &str, channel: &str, token: &str) -> Result<String> {
     let expiration = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::seconds(JWT_MAX_AGES))
         .expect("valid timestamp")
@@ -40,7 +40,7 @@ pub fn create_jwt(user: &str, group: &str, token: &str) -> Result<String> {
 
     let claims = Claims {
         user: user.to_owned(),
-        group: group.to_owned(),
+        channel: channel.to_owned(),
         token: token.to_owned(),
         exp: expiration as usize,
     };
@@ -54,16 +54,16 @@ pub fn create_jwt(user: &str, group: &str, token: &str) -> Result<String> {
     .map_err(|e| anyhow!("failed to encode jwt: {}", e))
 }
 
-fn group_from_header(headers: &HeaderMap<HeaderValue>) -> Result<String> {
-    let header = match headers.get("group") {
+fn channel_from_header(headers: &HeaderMap<HeaderValue>) -> Result<String> {
+    let header = match headers.get("channel") {
         Some(header) => header,
-        None => return Err(anyhow!("missing group header")),
+        None => return Err(anyhow!("missing channel header")),
     };
-    let group = match header.to_str() {
-        Ok(group) => group,
-        Err(_) => return Err(anyhow!("invalid group header")),
+    let channel = match header.to_str() {
+        Ok(channel) => channel,
+        Err(_) => return Err(anyhow!("invalid channel header")),
     };
-    Ok(group.to_owned())
+    Ok(channel.to_owned())
 }
 
 fn jwt_from_header(headers: &HeaderMap<HeaderValue>) -> Result<String> {
@@ -93,7 +93,7 @@ fn jwt_from_cookie(cookies: &Cookies) -> Result<String> {
     Ok(auth_cookie)
 }
 
-async fn authorize(group: &str, jwt: &str) -> Result<User> {
+async fn authorize(channel: &str, jwt: &str) -> Result<User> {
     let decoded = jsonwebtoken::decode::<Claims>(
         jwt,
         &jsonwebtoken::DecodingKey::from_secret(env::var("JWT_SECRET")?.as_bytes()),
@@ -101,8 +101,8 @@ async fn authorize(group: &str, jwt: &str) -> Result<User> {
     )
     .map_err(|e| anyhow!("failed to decode jwt: {}", e))?;
 
-    if decoded.claims.group != group {
-        return Err(anyhow!("invalid group"));
+    if decoded.claims.channel != channel {
+        return Err(anyhow!("invalid channel"));
     }
 
     if decoded.claims.exp < chrono::Utc::now().timestamp() as usize {
@@ -111,8 +111,7 @@ async fn authorize(group: &str, jwt: &str) -> Result<User> {
 
     Ok(User {
         id: decoded.claims.user,
-        group: decoded.claims.group,
-        auth_token: decoded.claims.token,
+        channel: decoded.claims.channel,
     })
 }
 
@@ -125,9 +124,9 @@ pub async fn auth<B>(
     println!("cookies len: {}", cookies.list().len());
     println!("request headers: {:?}", req.headers());
 
-    let request_group = match group_from_header(req.headers()) {
-        Ok(group) => group,
-        _ => DEFAULT_GROUP.to_owned(),
+    let request_channel = match channel_from_header(req.headers()) {
+        Ok(channel) => channel,
+        _ => DEFAULT_CHANNEL.to_owned(),
     };
 
     let jwt = match jwt_from_header(req.headers()) {
@@ -141,12 +140,12 @@ pub async fn auth<B>(
     match jwt {
         Ok(jwt) => {
             println!("jwt: {:?}", jwt);
-            let user = match authorize(&request_group, &jwt).await {
+            let user = match authorize(&request_channel, &jwt).await {
                 Ok(user) => user,
                 _ => return Err(StatusCode::UNAUTHORIZED),
             };
             println!("user: {:?}", user);
-            Ok(auth_next(req, next, user, &cookies).await)
+            Ok(auth_next(req, next, user, &jwt, &cookies).await)
         }
         _ => {
             let query = req.uri().query().unwrap_or_default();
@@ -154,18 +153,14 @@ pub async fn auth<B>(
 
             match get_github_user_id_and_token(query, &shared).await {
                 Ok((id, token)) => {
+                    let jwt = create_jwt(&id, &request_channel, &token).unwrap();
                     let user_opt = shared.db.find_user_by_id(&id).await.unwrap();
-                    let jwt = create_jwt(&id, &request_group, &token).unwrap();
                     let user = match user_opt {
-                        Some(mut user) => {
-                            user.auth_token = jwt;
-                            user
-                        }
+                        Some(user) => user,
                         None => {
                             let user = User {
                                 id,
-                                group: request_group.clone(),
-                                auth_token: jwt,
+                                channel: request_channel.clone(),
                             };
                             shared.db.insert_user(&user).await.unwrap();
                             user
@@ -173,7 +168,7 @@ pub async fn auth<B>(
                     };
 
                     println!("user: {:?}", user);
-                    Ok(auth_next(req, next, user, &cookies).await)
+                    Ok(auth_next(req, next, user, &jwt, &cookies).await)
                 }
                 Err(StatusCode::FOUND) => Ok(response_redirect_auth(&shared)),
                 _ => Err(StatusCode::UNAUTHORIZED),
@@ -239,7 +234,6 @@ async fn get_github_user_id_and_token(
     }
 
     let code = AuthorizationCode::new(code.unwrap());
-    // let _state = CsrfToken::new(state.unwrap().to_string());
 
     println!("Github returned the following code:\n{}\n", code.secret());
 
@@ -281,29 +275,28 @@ async fn auth_next<B>(
     mut req: Request<B>,
     next: Next<B>,
     user: User,
+    jwt: &str,
     cookies: &Cookies,
 ) -> Response {
-    let token = user.auth_token.clone();
-    let name = user.id.clone();
-
     println!("auth_next: {:?}", user);
+    let id = user.id.to_owned();
+    let channel = user.channel.to_owned();
 
     req.extensions_mut().insert(user);
 
     let mut res = next.run(req).await;
 
-    res.headers_mut().insert(
-        header::AUTHORIZATION,
-        HeaderValue::from_str(token.as_str()).unwrap(),
-    );
+    res.headers_mut()
+        .insert(header::AUTHORIZATION, HeaderValue::from_str(jwt).unwrap());
 
     let cookie_opts = format!(
         "Secure; HttpOnly; SameSite=None; Path=/; Max-Age={}",
         JWT_MAX_AGES
     );
 
-    cookies.add(Cookie::parse(format!("user={}; {}", name, cookie_opts)).unwrap());
-    cookies.add(Cookie::parse(format!("auth_token={}; {}", token, cookie_opts)).unwrap());
+    cookies.add(Cookie::parse(format!("user={}; {}", id, cookie_opts)).unwrap());
+    cookies.add(Cookie::parse(format!("channel={}; {}", channel, cookie_opts)).unwrap());
+    cookies.add(Cookie::parse(format!("auth_token={}; {}", jwt, cookie_opts)).unwrap());
 
     res
 }

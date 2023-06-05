@@ -22,32 +22,26 @@ impl Scylla {
 
         session
             .query(
-                "CREATE TABLE IF NOT EXISTS ks.u (id text primary key, group text, auth_token text)",
+                "CREATE TABLE IF NOT EXISTS ks.u (id text primary key, channel text)",
                 &[],
             )
             .await?;
 
         session
-            .query("CREATE TABLE IF NOT EXISTS ks.s (group text, id text, sched text, date_at date, create_at timestamp,
-                PRIMARY KEY (group, date_at, id, create_at))", &[])
-            .await?;
-
-        session
-            .query("CREATE INDEX IF NOT EXISTS ON ks.u (auth_token)", &[])
+            .query("CREATE TABLE IF NOT EXISTS ks.s (channel text, id text, sched text, date_at date, create_at timestamp,
+                PRIMARY KEY (channel, date_at, id, create_at))", &[])
             .await?;
 
         let prepared = session
-            .prepare("INSERT INTO ks.u (id, group, auth_token) VALUES (?, ?, ?)")
+            .prepare("INSERT INTO ks.u (id, channel) VALUES (?, ?)")
             .await?;
 
-        session.execute(&prepared, ("21kyu", "home", "")).await?;
-        session
-            .execute(&prepared, ("csj200045", "home", ""))
-            .await?;
+        session.execute(&prepared, ("21kyu", "home")).await?;
+        session.execute(&prepared, ("csj200045", "home")).await?;
 
         let prepared = session
             .prepare(
-                "INSERT INTO ks.s (group, id, sched, date_at, create_at) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO ks.s (channel, id, sched, date_at, create_at) VALUES (?, ?, ?, ?, ?)",
             )
             .await?;
 
@@ -95,7 +89,7 @@ impl Scylla {
     pub async fn find_user_by_id(&self, id: &str) -> Result<Option<User>> {
         if let Some(rows) = self
             .session
-            .query("SELECT id, group, auth_token FROM ks.u WHERE id = ?", (id,))
+            .query("SELECT id, channel FROM ks.u WHERE id = ?", (id,))
             .await?
             .rows
         {
@@ -109,18 +103,11 @@ impl Scylla {
     pub async fn insert_user(&self, user: &User) -> Result<()> {
         let prepared = self
             .session
-            .prepare("INSERT INTO ks.u (id, group, auth_token) VALUES (?, ?, ?)")
+            .prepare("INSERT INTO ks.u (id, channel) VALUES (?, ?)")
             .await?;
 
         self.session
-            .execute(
-                &prepared,
-                (
-                    user.id.as_str(),
-                    user.group.as_str(),
-                    user.auth_token.as_str(),
-                ),
-            )
+            .execute(&prepared, (user.id.as_str(), user.channel.as_str()))
             .await?;
 
         Ok(())
@@ -129,28 +116,21 @@ impl Scylla {
     pub async fn update_user(&self, user: &User) -> Result<()> {
         let prepared = self
             .session
-            .prepare("UPDATE ks.u SET group = ?, auth_token = ? WHERE id = ?")
+            .prepare("UPDATE ks.u SET channel = ? WHERE id = ?")
             .await?;
 
         self.session
-            .execute(
-                &prepared,
-                (
-                    user.group.as_str(),
-                    user.auth_token.as_str(),
-                    user.id.as_str(),
-                ),
-            )
+            .execute(&prepared, (user.channel.as_str(), user.id.as_str()))
             .await?;
 
         Ok(())
     }
 
-    pub async fn find_sched_by_group(&self, group: &str) -> Result<Vec<Sched>> {
-        let q = "SELECT group, id, sched, date_at, create_at FROM ks.s WHERE group = ?";
+    pub async fn find_sched_by_channel(&self, channel: &str) -> Result<Vec<Sched>> {
+        let q = "SELECT channel, id, sched, date_at, create_at FROM ks.s WHERE channel = ?";
         let prepared = self.session.prepare(q).await?;
         Ok(
-            match self.session.execute(&prepared, (group,)).await?.rows {
+            match self.session.execute(&prepared, (channel,)).await?.rows {
                 Some(rows) => rows.into_typed::<Sched>().map(|s| s.unwrap()).collect(),
                 _ => vec![],
             },

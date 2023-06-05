@@ -18,18 +18,15 @@ use anyhow::Result;
 use axum::body::{boxed, Body, StreamBody};
 use axum::error_handling::HandleError;
 use axum::extract::{Path, Query, State};
-// use axum::handler::HandlerWithoutStateExt;
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::{middleware, Extension, Json};
+use axum::{middleware, Json};
 use axum::{routing::get, Router};
 use clap::Parser;
 use futures::stream::{self, StreamExt};
 use hyper::server::Server;
 use oauth2::basic::BasicClient;
-// use oauth2::reqwest::async_http_client;
 use oauth2::{CsrfToken, Scope};
-// use octocrab::Octocrab;
 use sched_bird::{ServerApp, ServerAppProps};
 use scylla::IntoTypedRows;
 use serde_json::json;
@@ -108,7 +105,7 @@ async fn main() -> Result<()> {
     if let Some(rows) = shared_state
         .db
         .session
-        .query("SELECT id, group, auth_token FROM ks.u", &[])
+        .query("SELECT id, channel FROM ks.u", &[])
         .await?
         .rows
     {
@@ -138,7 +135,7 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/auth", get(auth))
-        .route("/api/v1/groups/:group_id/scheds", get(get_scheds))
+        .route("/api/v1/channels/:channel/scheds", get(get_scheds))
         .with_state(Arc::clone(&shared_state))
         .route_layer(middleware::from_fn_with_state(shared_state, auth::auth))
         .fallback_service(HandleError::new(
@@ -162,6 +159,13 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn get_cookie_value(cookies: &Cookies, name: &str) -> String {
+    cookies
+        .get(name)
+        .and_then(|c| c.value().parse().ok())
+        .unwrap_or_default()
+}
+
 async fn render(
     url: Uri,
     cookies: Cookies,
@@ -172,15 +176,16 @@ async fn render(
 
     println!("cookies: {:?}", cookies);
 
-    let cookie_token: String = cookies
-        .get("auth_token")
-        .and_then(|c| c.value().parse().ok())
-        .unwrap_or_default();
+    let user = get_cookie_value(&cookies, "user");
+    let channel = get_cookie_value(&cookies, "channel");
+    let token: String = get_cookie_value(&cookies, "auth_token");
 
     let renderer = yew::ServerRenderer::<ServerApp>::with_props(move || ServerAppProps {
         url: url.into(),
         queries,
-        token: cookie_token,
+        user,
+        channel,
+        token,
     });
 
     StreamBody::new(
@@ -191,21 +196,20 @@ async fn render(
     )
 }
 
-async fn auth(Extension(user): Extension<User>) -> impl IntoResponse {
+async fn auth() -> impl IntoResponse {
     Response::builder()
         .status(StatusCode::FOUND)
         .header(header::LOCATION, "https://sched.sinabro.io/")
-        .header(header::AUTHORIZATION, user.auth_token)
         .body(boxed(Body::empty()))
         .unwrap()
 }
 
 async fn get_scheds(
-    Path(group_id): Path<String>,
+    Path(channel): Path<String>,
     // Extension(user): Extension<User>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    let scheds = state.db.find_sched_by_group(&group_id).await.unwrap();
+    let scheds = state.db.find_sched_by_channel(&channel).await.unwrap();
 
     let content = json!({ "data": scheds });
 

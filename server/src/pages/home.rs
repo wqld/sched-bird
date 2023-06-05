@@ -5,7 +5,7 @@ use crate::Auth;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 struct Sched {
-    group: String,
+    channel: String,
     id: String,
     sched: String,
     date_at: String,
@@ -18,13 +18,16 @@ struct SchedResponse {
 }
 
 #[cfg(feature = "ssr")]
-async fn fetch_sched(token: String) -> SchedResponse {
-    // reqwest works for both non-wasm and wasm targets.
+async fn fetch_sched(token: &str, channel: &str) -> SchedResponse {
     let client = reqwest::Client::new();
+    let url = format!(
+        "https://sched.sinabro.io/api/v1/channels/{}/scheds",
+        channel
+    );
     let resp = client
-        .get("https://sched.sinabro.io/api/v1/groups/home/scheds")
+        .get(url)
         .header("authorization", format!("Bearer {}", token))
-        .header("group", "home")
+        .header("channel", "home")
         .send()
         .await
         .unwrap();
@@ -43,38 +46,22 @@ async fn fetch_sched(token: String) -> SchedResponse {
     }
 }
 
-// #[cfg(feature = "ssr")]
-// async fn fetch_token() -> String {
-//     println!("fetch_token");
-
-//     let resp = reqwest::get("https://sched.sinabro.io/auth/token")
-//         .await
-//         .unwrap();
-
-//     let token = resp.headers().get("authorization");
-
-//     match token {
-//         Some(token) => token.to_str().unwrap().to_owned(),
-//         None => "".to_owned(),
-//     }
-// }
-
 #[function_component]
 fn Content() -> HtmlResult {
-    let ctx = use_context::<Auth>().expect("no ctx found");
+    let ctx = use_context::<Auth>().unwrap();
     println!("ctx: {:?}", ctx);
 
-    let token = ctx.token;
+    let user = ctx.user;
 
     let scheds = use_prepared_state!(
-        async move |token| -> SchedResponse { fetch_sched(token.to_string()).await },
-        token
+        async move |_| -> SchedResponse { fetch_sched(&ctx.token, &ctx.channel).await },
+        ()
     )?
     .unwrap();
 
     Ok(html! {
         <div>
-            <h1>{"Home"}</h1>
+            <h1>{"Hello "}{user}</h1>
             <ul>
                 {for scheds.data.iter().map(|sched| {
                     html! {
@@ -90,7 +77,7 @@ fn Content() -> HtmlResult {
 
 #[function_component]
 pub fn Home() -> Html {
-    let ctx = use_context::<Auth>().expect("no ctx found");
+    let ctx = use_context::<Auth>().unwrap();
     let fallback = html! {<div>{"Loading..."}</div>};
 
     println!("ctx: {:?}", ctx);

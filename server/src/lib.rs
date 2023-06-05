@@ -40,18 +40,24 @@ pub fn App() -> Html {
 pub struct ServerAppProps {
     pub url: AttrValue,
     pub queries: HashMap<String, String>,
+    pub user: String,
+    pub channel: String,
     pub token: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Auth {
+    pub user: String,
+    pub channel: String,
     pub token: String,
 }
 
 #[function_component]
 pub fn ServerApp(props: &ServerAppProps) -> Html {
     let ctx = use_state(|| Auth {
-        token: props.token.clone(),
+        user: props.user.to_owned(),
+        channel: props.channel.to_owned(),
+        token: props.token.to_owned(),
     });
 
     let history = AnyHistory::from(MemoryHistory::new());

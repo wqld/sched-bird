@@ -4,7 +4,7 @@ use serde::ser::{Serialize, SerializeStruct, Serializer};
 
 #[derive(Debug, FromRow, Clone, PartialEq)]
 pub struct Sched {
-    pub group: String,
+    pub channel: String,
     pub id: String,
     pub sched: String,
     pub date_at: NaiveDate,
@@ -17,7 +17,7 @@ impl Serialize for Sched {
         S: Serializer,
     {
         let mut state = serializer.serialize_struct("Sched", 5)?;
-        state.serialize_field("group", &self.group)?;
+        state.serialize_field("channel", &self.channel)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("sched", &self.sched)?;
         state.serialize_field("date_at", &self.date_at)?;
