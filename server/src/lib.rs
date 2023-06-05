@@ -62,11 +62,11 @@ pub fn ServerApp(props: &ServerAppProps) -> Html {
 
     html! {
         <Router history={history}>
+            <ContextProvider<Auth> context={(*ctx).clone()}>
                 <main>
-                <ContextProvider<Auth> context={(*ctx).clone()}>
                     <Switch<Route> render={switch} />
-                    </ContextProvider<Auth>>
                 </main>
+            </ContextProvider<Auth>>
         </Router>
     }
 }

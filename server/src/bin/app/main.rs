@@ -124,6 +124,14 @@ async fn main() -> Result<()> {
     let (index_html_before, index_html_after) = index_html_s.split_once("<body>").unwrap();
     let mut index_html_before = index_html_before.to_owned();
 
+    let head_start_index = index_html_before
+        .find("<head>")
+        .unwrap_or_else(|| index_html_before.len());
+
+    let meta_viewport =
+        r#"<meta name="viewport" content="width=device-width, initial-scale=1.0" />"#;
+    index_html_before.insert_str(head_start_index, meta_viewport);
+
     let head_end_index = index_html_before
         .find("</head>")
         .unwrap_or_else(|| index_html_before.len());

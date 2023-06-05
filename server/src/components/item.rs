@@ -13,7 +13,7 @@ pub fn Item(props: &ItemProps) -> Html {
         <article class="flex max-w-xl flex-col items-start justify-between">
             <div class="flex items-center gap-x-4 text-xs">
               <p class="text-gray-500">{props.date_at.to_owned()}</p>
-              <a href="#" class="relative z-10 rounded-full bg-gray-50 px-3 py-1.5 font-medium text-gray-600 hover:bg-gray-100">{props.user.to_owned()}</a>
+              <a href="#" class="relative rounded-full bg-gray-50 px-3 py-1.5 font-medium text-gray-600 hover:bg-gray-100">{props.user.to_owned()}</a>
             </div>
             <div class="group relative">
               <h3 class="mt-3 text-lg font-semibold leading-6 text-gray-900 group-hover:text-gray-600">
