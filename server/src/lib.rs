@@ -22,12 +22,18 @@ pub enum Route {
 
 #[function_component]
 pub fn App() -> Html {
+    let ctx = use_state(|| Auth {
+        ..Default::default()
+    });
+
     html! {
+        <ContextProvider<Auth> context={(*ctx).clone()}>
         <BrowserRouter>
             <main>
                 <Switch<Route> render={switch} />
             </main>
         </BrowserRouter>
+        </ContextProvider<Auth>>
     }
 }
 
@@ -40,7 +46,7 @@ pub struct ServerAppProps {
     pub token: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct Auth {
     pub user: String,
     pub channel: String,
@@ -61,13 +67,13 @@ pub fn ServerApp(props: &ServerAppProps) -> Html {
         .unwrap();
 
     html! {
-        <Router history={history}>
-            <ContextProvider<Auth> context={(*ctx).clone()}>
+        <ContextProvider<Auth> context={(*ctx).clone()}>
+            <Router history={history}>
                 <main>
                     <Switch<Route> render={switch} />
                 </main>
-            </ContextProvider<Auth>>
-        </Router>
+            </Router>
+        </ContextProvider<Auth>>
     }
 }
 
