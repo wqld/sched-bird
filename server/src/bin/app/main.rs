@@ -9,6 +9,7 @@ use crate::user::User;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::env;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -21,8 +22,8 @@ use axum::error_handling::HandleError;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::{middleware, Json};
-use axum::{routing::get, Router};
+use axum::{middleware, Extension};
+use axum::{routing::get, routing::post, Json, Router};
 use clap::Parser;
 use futures::stream::{self, StreamExt};
 use hyper::server::Server;
@@ -30,7 +31,7 @@ use oauth2::basic::BasicClient;
 use oauth2::{CsrfToken, Scope};
 use sched_bird::{ServerApp, ServerAppProps};
 use scylla::IntoTypedRows;
-use serde_json::json;
+use serde::Deserialize;
 use tower::ServiceExt;
 use tower_cookies::{CookieManagerLayer, Cookies};
 use tower_http::services::ServeDir;
@@ -126,7 +127,7 @@ async fn main() -> Result<()> {
 
     let head_start_index = index_html_before
         .find("<head>")
-        .unwrap_or_else(|| index_html_before.len());
+        .unwrap_or(index_html_before.len());
 
     let meta_viewport =
         r#"<meta name="viewport" content="width=device-width, initial-scale=1.0" />"#;
@@ -134,7 +135,7 @@ async fn main() -> Result<()> {
 
     let head_end_index = index_html_before
         .find("</head>")
-        .unwrap_or_else(|| index_html_before.len());
+        .unwrap_or(index_html_before.len());
 
     let tailwind_css = r#"<script src="https://cdn.tailwindcss.com"></script>"#;
     index_html_before.insert_str(head_end_index, tailwind_css);
@@ -152,6 +153,7 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/auth", get(auth))
         .route("/api/v1/channels/:channel/scheds", get(get_scheds))
+        .route("/api/v1/gpt", post(invoke_gpt))
         .with_state(Arc::clone(&shared_state))
         .route_layer(middleware::from_fn_with_state(shared_state, auth::auth))
         .fallback_service(HandleError::new(
@@ -222,14 +224,55 @@ async fn auth() -> impl IntoResponse {
 
 async fn get_scheds(
     Path(channel): Path<String>,
-    // Extension(user): Extension<User>,
+    Extension(user): Extension<User>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let scheds = state.db.find_sched_by_channel(&channel).await.unwrap();
 
-    let content = json!({ "data": scheds });
+    let content = serde_json::json!({ "user": user.id, "channel": user.channel, "data": scheds });
 
     println!("scheds: {:?}", content);
 
     Json(content)
+}
+
+#[derive(Deserialize, Debug)]
+struct OpenAiRequest {
+    query: String,
+}
+
+async fn invoke_gpt(
+    State(state): State<Arc<AppState>>,
+    Json(input): Json<OpenAiRequest>,
+) -> impl IntoResponse {
+    let open_ai_secret = env::var("OPENAI_SECRET").unwrap();
+
+    println!("input: {:?}", input);
+
+    let query = gpt::request_gpt_api(&open_ai_secret, &input.query).await;
+
+    println!("query: {:?}", query);
+
+    match query {
+        Ok(query) => match state.db.insert(&query).await {
+            Ok(_) => Response::builder()
+                .status(StatusCode::OK)
+                .body(boxed(Body::empty()))
+                .unwrap(),
+            Err(err) => {
+                println!("err: {:?}", err);
+                Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(boxed(Body::from(err.to_string())))
+                    .unwrap()
+            }
+        },
+        Err(err) => {
+            println!("err: {:?}", err);
+            Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(boxed(Body::from(err.to_string())))
+                .unwrap()
+        }
+    }
 }

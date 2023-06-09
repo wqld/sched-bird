@@ -11,4 +11,6 @@ The following tools helped me achieve the configuration I wanted:
 - Axum
 - Github OAuth
 - ScyllaDB
+- Tailwind CSS
 - Docker Compose
+- OpenAI Chat Completion

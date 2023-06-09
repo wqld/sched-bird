@@ -1,8 +1,7 @@
 use std::env;
 
 use anyhow::Result;
-use chrono::{Duration, NaiveDate};
-use scylla::{frame::value::Timestamp, IntoTypedRows, Session, SessionBuilder};
+use scylla::{IntoTypedRows, Session, SessionBuilder};
 
 use crate::{sched::Sched, user::User};
 
@@ -39,49 +38,9 @@ impl Scylla {
         session.execute(&prepared, ("21kyu", "home")).await?;
         session.execute(&prepared, ("csj200045", "home")).await?;
 
-        let prepared = session
-            .prepare(
-                "INSERT INTO ks.s (channel, id, sched, date_at, create_at) VALUES (?, ?, ?, ?, ?)",
-            )
-            .await?;
-
-        let date1 = NaiveDate::from_ymd_opt(2023, 6, 5).unwrap();
-        let date2 = NaiveDate::from_ymd_opt(2023, 6, 17).unwrap();
-        let date3 = NaiveDate::from_ymd_opt(2023, 6, 30).unwrap();
-        let create_at = Duration::seconds(64);
-
-        session
-            .execute(
-                &prepared,
-                (
-                    "home",
-                    "csj200045",
-                    "test test test test test",
-                    date1,
-                    Timestamp(create_at),
-                ),
-            )
-            .await?;
-
-        session
-            .execute(
-                &prepared,
-                (
-                    "home",
-                    "csj20045",
-                    "I have to go play..",
-                    date2,
-                    Timestamp(create_at),
-                ),
-            )
-            .await?;
-
-        session
-            .execute(
-                &prepared,
-                ("home", "21kyu", "hello world~", date3, Timestamp(create_at)),
-            )
-            .await?;
+        // session.query("INSERT INTO ks.s (channel, id, sched, date_at, create_at) VALUES ('home', '21kyu', '봄소풍', '2023-06-26', toTimestamp(now()))", &[]).await?;
+        // session.query("INSERT INTO ks.s (channel, id, sched, date_at, create_at) VALUES ('home', 'csj200045', 'I have to go play..', '2023-06-09', toTimestamp(now()))", &[]).await?;
+        // session.query("INSERT INTO ks.s (channel, id, sched, date_at, create_at) VALUES ('home', 'csj200045', 'hello world~', '2023-06-30', toTimestamp(now()))", &[]).await?;
 
         Ok(Self { session })
     }
@@ -113,19 +72,6 @@ impl Scylla {
         Ok(())
     }
 
-    pub async fn update_user(&self, user: &User) -> Result<()> {
-        let prepared = self
-            .session
-            .prepare("UPDATE ks.u SET channel = ? WHERE id = ?")
-            .await?;
-
-        self.session
-            .execute(&prepared, (user.channel.as_str(), user.id.as_str()))
-            .await?;
-
-        Ok(())
-    }
-
     pub async fn find_sched_by_channel(&self, channel: &str) -> Result<Vec<Sched>> {
         let q = "SELECT channel, id, sched, date_at, create_at FROM ks.s WHERE channel = ?";
         let prepared = self.session.prepare(q).await?;
@@ -135,5 +81,11 @@ impl Scylla {
                 _ => vec![],
             },
         )
+    }
+
+    pub async fn insert(&self, query: &str) -> Result<()> {
+        println!("submitted query: {}", query);
+        self.session.query(query, &[]).await?;
+        Ok(())
     }
 }
