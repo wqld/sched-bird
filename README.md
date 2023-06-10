@@ -14,3 +14,7 @@ The following tools helped me achieve the configuration I wanted:
 - Tailwind CSS
 - Docker Compose
 - OpenAI Chat Completion
+
+## How to work?
+
+![](./static/record.gif)
