@@ -45,7 +45,7 @@ pub async fn request_gpt_api(key: &str, query: &str) -> Result<String> {
                         channel: The name of the channel.
                         id: The user's name.
                         sched: What kind of schedule is registered.
-                        date_at: The date at which the schedule will be registered.
+                        date_at: The date at which the schedule will be registered. If there is no specific mention of the year, please specify the current year(2023).
                         create_at: The time the query is registered, you can use toTimestamp(now()).
                         
                         Just give me the string query that was created. You shouldn't output a description or anything else.

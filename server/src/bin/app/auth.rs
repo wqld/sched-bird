@@ -21,7 +21,7 @@ use crate::user::User;
 use crate::AppState;
 
 const BEARER: &str = "Bearer ";
-const JWT_MAX_AGES: i64 = 60;
+const JWT_MAX_AGES: i64 = 600;
 const DEFAULT_CHANNEL: &str = "home";
 
 #[derive(Debug, Deserialize, Serialize)]

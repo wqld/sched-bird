@@ -242,6 +242,7 @@ struct OpenAiRequest {
 }
 
 async fn invoke_gpt(
+    Extension(user): Extension<User>,
     State(state): State<Arc<AppState>>,
     Json(input): Json<OpenAiRequest>,
 ) -> impl IntoResponse {
@@ -255,10 +256,15 @@ async fn invoke_gpt(
 
     match query {
         Ok(query) => match state.db.insert(&query).await {
-            Ok(_) => Response::builder()
-                .status(StatusCode::OK)
-                .body(boxed(Body::empty()))
-                .unwrap(),
+            Ok(_) => {
+                let scheds = state.db.find_sched_by_channel(&user.channel).await.unwrap();
+                let content =
+                    serde_json::json!({ "user": user.id, "channel": user.channel, "data": scheds });
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .body(boxed(Body::from(content.to_string())))
+                    .unwrap();
+            }
             Err(err) => {
                 println!("err: {:?}", err);
                 Response::builder()

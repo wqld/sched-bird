@@ -7,7 +7,7 @@ use crate::{
     Auth,
 };
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 pub struct Sched {
     channel: String,
     id: String,
@@ -16,7 +16,7 @@ pub struct Sched {
     create_at: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 struct SchedResponse {
     user: String,
     channel: String,
@@ -61,6 +61,12 @@ fn Content() -> HtmlResult {
     .unwrap();
 
     let message = use_state(|| "".to_string());
+    let send = use_state(|| false);
+    let state = use_state_eq(|| SchedResponse {
+        user: scheds.user.to_string(),
+        channel: scheds.channel.to_string(),
+        data: scheds.data.to_owned(),
+    });
 
     let onchange = {
         let message = message.clone();
@@ -73,10 +79,17 @@ fn Content() -> HtmlResult {
 
     let onclick = {
         let message = message.clone();
-        let user = scheds.user.clone();
-        let channel = scheds.channel.clone();
+        let send = send.clone();
+        let state = state.clone();
 
         Callback::from(move |_| {
+            send.set(true);
+            let send = send.clone();
+            let message = message.clone();
+            let state = state.clone();
+            let user = state.user.to_string();
+            let channel = state.channel.to_string();
+
             #[cfg(feature = "hydration")]
             {
                 let mut map = std::collections::HashMap::new();
@@ -87,30 +100,38 @@ fn Content() -> HtmlResult {
 
                 wasm_bindgen_futures::spawn_local(async move {
                     let client = reqwest::Client::new();
-                    let res = client
+                    let resp = client
                         .post("https://sched.sinabro.io/api/v1/gpt")
                         .json(&map)
                         .send()
                         .await
                         .unwrap();
 
-                    assert_eq!(res.status(), 200);
+                    assert_eq!(resp.status(), 200);
+
+                    let scheds = resp.json::<SchedResponse>().await.unwrap();
+
+                    send.set(false);
+                    message.set("".to_string());
+                    state.set(SchedResponse {
+                        user: scheds.user.clone(),
+                        channel: scheds.channel.clone(),
+                        data: scheds.data.to_vec(),
+                    });
                 });
             }
-
-            message.set("".to_string());
         })
     };
 
     Ok(html! {
       <div class="bg-white py-8">
-        <div class="mx-auto max-w-7xl px-6">
+        <div class="mx-auto max-w-7xl px-6 pb-10 mb-5">
             <div class="mx-auto max-w-2xl">
-                <h2 class="text-3xl font-bold tracking-tight text-gray-900 text-4xl mt-6">{"Hello, "}{&scheds.user}</h2>
-                <p class="mt-2 text-lg leading-8 text-gray-600">{&scheds.channel}{" 채널에 등록된 오늘부터의 일정이에요."}</p>
+                <h2 class="text-3xl font-bold tracking-tight text-gray-900 text-4xl mt-6">{"Hello, "}{state.user.to_string()}</h2>
+                <p class="mt-2 text-lg leading-8 text-gray-600">{"Schedules registered in the "}{state.channel.to_string()}{" channel after today"}</p>
             </div>
             <div class="mx-auto mt-10 grid max-w-2xl grid-cols-1 gap-x-8 gap-y-10 border-t border-gray-200 pt-10">
-            {for scheds.data.iter().map(|sched| {
+            {for state.data.iter().map(|sched| {
                 html! {<Item user={sched.id.clone()} sched={sched.sched.clone()} date_at={sched.date_at.clone()} />}
             })}
             </div>
@@ -120,8 +141,12 @@ fn Content() -> HtmlResult {
             <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200">
                 <div class="mx-auto max-w-7xl px-6 py-3 flex gap-x-4">
                     <label for="command" class="sr-only">{"command"}</label>
-                    <input {onchange} value={(*message).clone()} id="command" name="command" type="text" required=true class="min-w-0 flex-auto rounded-md border-0 bg-white/5 px-3.5 py-2 shadow-sm ring-1 ring-inset ring-white/10 focus:ring-2 focus:ring-inset focus:ring-indigo-500" placeholder="언제, 어떤 일정을 등록할까요?" />
-                    <button {onclick} type="submit" class="flex-none rounded-md bg-stone-900 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-stone-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{"보내기"}</button>
+                    <input {onchange} value={(*message).clone()} id="command" name="command" type="text" required=true class="min-w-0 flex-auto rounded-md border-0 bg-white/5 px-3.5 py-2 shadow-sm ring-1 ring-inset ring-white/10 focus:ring-2 focus:ring-inset focus:ring-indigo-500" placeholder="When and what schedule would you like to register?" />
+                    if *send {
+                        <button class="flex-none rounded-md bg-stone-300 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm">{"Proc"}</button>
+                    } else {
+                        <button {onclick} type="submit" class="flex-none rounded-md bg-stone-900 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-stone-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{"Send"}</button>
+                    }
                 </div>
             </div>
         </div>
