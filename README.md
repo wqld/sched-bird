@@ -12,9 +12,10 @@ The following tools helped me achieve the configuration I wanted:
 - Github OAuth
 - ScyllaDB
 - Tailwind CSS
+- Let's Encrypt ACME
 - Docker Compose
 - OpenAI Chat Completion
 
-## How to work?
+## How does it work?
 
 ![](./static/record.gif)
